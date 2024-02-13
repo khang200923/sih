@@ -5,6 +5,7 @@
 #include <random>
 #include <cmath>
 #include <array>
+#include <algorithm>
 
 using machstream = std::vector<uint16_t>;
 using memorytape = std::vector<uint16_t>;
@@ -87,8 +88,11 @@ RunningMachine initiateMachine(Machine machine, uint16_t memory_len) {
     RunningMachine result;
     result.machine = machine;
     result.tapelength = memory_len;
+    result.codepointer = 0;
+    result.tapepointer = 0;
     for (int i = 0; i < MEMORY_TAPES; ++i) {
         result.memories[i] = initiateTape(memory_len);
+        result.pointers[i] = 0;
     }
     result.halt = false;
 
@@ -96,11 +100,15 @@ RunningMachine initiateMachine(Machine machine, uint16_t memory_len) {
 }
 
 void runTick(RunningMachine& runmachine) {
+    Machine& machine = runmachine.machine;
+
+    if (runmachine.codepointer >= machine.length) {
+        runmachine.halt = true;
+    }
+
     if (runmachine.halt) {
         return;
     }
-
-    Machine& machine = runmachine.machine;
 
     //get from code pointer and tape pointer
     uint8_t& codePiece = machine.code[runmachine.codepointer];
@@ -132,23 +140,62 @@ void runTick(RunningMachine& runmachine) {
 
     runmachine.codepointer += 1;
 
-    if (runmachine.codepointer >= machine.code.size()) {
-        runmachine.halt = true;
-    }
 }
 
-machstream roll(uint16_t prog_len_limit, uint16_t memory_len, uint16_t exec_limit) {
+RunningMachine roll(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len) {
     Machine machine = generateRandomMachine(prog_len_limit);
     RunningMachine runmachine = initiateMachine(machine, memory_len);
 
     for (int i = 0; i < exec_limit; ++i) {
-        runTick(runmachine);
         if (runmachine.halt) {
             break;
         }
+        runTick(runmachine);
     }
 
-    return runmachine.output;
+    return runmachine;
+}
+
+uint32_t error(machstream target, machstream prediction) {
+    if (target.size() > prediction.size()) {
+        return std::numeric_limits<uint32_t>::max();
+    }
+
+    uint32_t sum = 0;
+    for (uint16_t i = 0; i < target.size(); ++i) {
+            sum += std::min(target[i] - prediction[i], prediction[i] - target[i]);
+    }
+
+    return sum;
+}
+
+RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint16_t search_depth) {
+    uint16_t search_index = 0;
+    RunningMachine best;
+    uint32_t besterror = std::numeric_limits<uint32_t>::max();
+    RunningMachine alt;
+    uint32_t alterror;
+    uint16_t this_memory_len = memory_len;
+    while (true) {
+        if (search_index >= search_depth) {
+            break;
+        }
+
+        alt = roll(exec_limit, prog_len_limit, this_memory_len);
+        alterror = error(target, alt.output);
+
+        if (alterror < besterror) {
+            best = alt;
+            besterror = alterror;
+        }
+        if (besterror == 0) {
+            this_memory_len = best.machine.length;
+        }
+
+        search_index += 1;
+    }
+
+    return best;
 }
 
 template<typename InputStream>
@@ -167,6 +214,30 @@ machstream parseInput(InputStream& input) {
     return result;
 }
 
+template<typename T>
+std::string vectorToString(const std::vector<T>& vec) {
+    std::ostringstream oss;
+    if (!vec.empty()) {
+        oss << static_cast<int>(vec[0]);
+        for (size_t i = 1; i < vec.size(); ++i) {
+            oss << " " << static_cast<int>(vec[i]);
+        }
+    }
+    return oss.str();
+}
+
+template<typename T, size_t s>
+std::string arrayToString(const std::array<T, s>& arr) {
+    std::ostringstream oss;
+    if (!arr.empty()) {
+        oss << static_cast<int>(arr[0]);
+        for (size_t i = 1; i < arr.size(); ++i) {
+            oss << " " << static_cast<int>(arr[i]);
+        }
+    }
+    return oss.str();
+}
+
 int main(int argc, char* argv[]) {
     std::vector<std::string> args(argv, argv + argc);
 
@@ -178,8 +249,6 @@ int main(int argc, char* argv[]) {
     machstream target;
 
     for (int i = 1; i < argc; ++i) {
-        std::cout << ((args[i] == "-o") || (args[i] == "--options")) << std::endl;
-        std::cout << (args[i] == "-o") << std::endl;
         if ((args[i] == "-o") || (args[i] == "--options")) {
             if (i + 4 >= argc) {
                 std::cerr << "Invalid option flag";
@@ -207,23 +276,21 @@ int main(int argc, char* argv[]) {
                 for (int j = ++i; j < argc; ++j) {
                     target.push_back(std::stoi(args[i]));
                 }
-                break;
+            } else {
+                try {
+                    target = parseInput(std::cin);
+                } catch (const std::invalid_argument& e) {
+                    std::cerr << "Invalid input: must be array of integers in the range 0-65535." << std::endl;
+                    return 1;
+                }
             }
 
-            try {
-                target = parseInput(std::cin);
-            } catch (const std::invalid_argument& e) {
-                std::cerr << "Invalid input: must be array of integers in the range 0-65535." << std::endl;
-                return 1;
-            }
+            //calculation
+            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
+
+            std::cout << vectorToString(result.output) << std::endl;
         }
     }
-
-    std::cout << "okay i am fine" << std::endl;
-    std::cout << exec_limit << std::endl;
-    std::cout << prog_len_limit << std::endl;
-    std::cout << memory_len << std::endl;
-    std::cout << search_depth << std::endl;
 
     return 0;
 }
