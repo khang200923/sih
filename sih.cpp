@@ -9,6 +9,9 @@
 #include <csignal>
 #include <memory>
 
+//#define DEBUG_MACHINE_INFO
+//#define DEBUG_PREDICT_PROGRESS
+
 using machstream = std::vector<uint16_t>;
 using memorytape = std::vector<uint16_t>;
 
@@ -57,7 +60,8 @@ struct Machine {
     //op=3: move loc pointer to left
     //op=4: move to another tape
     //op=5: output the current loc
-    std::array<uint8_t, 65536> code;
+    std::array<uint8_t, 65536> codeop;
+    std::array<uint8_t, 65536> codeval;
     std::array<uint16_t, 65536> zeroRedirect;
     std::array<uint16_t, 65536> redirect;
 };
@@ -92,7 +96,6 @@ T random_with_bias(T start_value, T end_value, double bias_factor = 0.6) {
 }
 
 Machine generateRandomMachine(uint16_t prog_len_limit) {
-
     Machine machine;
 
     std::uniform_int_distribution<uint16_t> length_dist(0, 65535);
@@ -105,7 +108,8 @@ Machine generateRandomMachine(uint16_t prog_len_limit) {
     std::uniform_int_distribution<uint8_t> val_dist(0, CODE_PART_DIVISION);
 
     for (uint16_t i = 0; i < machine.length; ++i) {
-        machine.code[i] = op_dist(gen) * CODE_PART_DIVISION + random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1);
+        machine.codeop[i] = op_dist(gen) % CODE_OP_AMOUNT;
+        machine.codeval[i] = random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1);
         if (dis(gen) < 0.2) {
             machine.zeroRedirect[i] = static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length;
         } else {
@@ -152,16 +156,13 @@ void runTick(RunningMachine& runmachine) {
     }
 
     //get from code pointer and tape pointer
-    uint8_t& codePiece = machine.code[runmachine.codepointer];
+    uint8_t op = machine.codeop[runmachine.codepointer];
+    uint8_t val = machine.codeval[runmachine.codepointer];
     uint16_t& zeroRedirect = machine.zeroRedirect[runmachine.codepointer];
     uint16_t& redirect = machine.redirect[runmachine.codepointer];
     memorytape& currentTape = runmachine.memories[runmachine.tapepointer];
     uint16_t& currentPointer = runmachine.pointers[runmachine.tapepointer];
     uint16_t& currentLoc = currentTape[currentPointer];
-
-    //split into op and val
-    uint8_t op = (codePiece / CODE_PART_DIVISION) % CODE_OP_AMOUNT;
-    uint8_t val = codePiece % CODE_PART_DIVISION;
 
     //do some computation
     if (op == 0) {
@@ -210,14 +211,16 @@ uint32_t error(machstream target, machstream prediction) {
 
     uint32_t sum = 0;
     for (uint16_t i = 0; i < target.size(); ++i) {
-            sum += std::min(target[i] - prediction[i], prediction[i] - target[i]);
+            sum += std::min<uint16_t>(target[i] - prediction[i], prediction[i] - target[i]);
     }
 
     return sum;
 }
 
 void continueExec(RunningMachine& runmachine, uint16_t req, uint32_t continue_limit) {
-    std::cout << "Continue" << std::endl;
+#ifdef DEBUG_PREDICT_PROGRESS
+    std::cerr << " ...continue" << std::endl;
+#endif
     for (int i = 0; i < continue_limit; ++i) {
         if (runmachine.output.size() >= req) {
             break;
@@ -232,9 +235,11 @@ RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len
     uint32_t besterror = std::numeric_limits<uint32_t>::max();
     uint16_t this_prog_len_limit = prog_len_limit;
     while (true) {
+#ifdef DEBUG_PREDICT_PROGRESS
         if (search_index % 1000 == 0) {
-            std::cout << "f";
+            std::cerr << "f";
         }
+#endif
 
         if (search_index >= search_depth) {
             break;
@@ -345,7 +350,8 @@ int main(int argc, char* argv[]) {
             alreadyCalc = true;
             if (i + 1 < argc) {
                 for (int j = ++i; j < argc; ++j) {
-                    target.push_back(std::stoi(args[i]));
+                    target.push_back(std::stoi(args[j]));
+
                 }
             } else {
                 target = parseInput(std::cin);
@@ -353,10 +359,13 @@ int main(int argc, char* argv[]) {
 
             RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit);
             std::cout << vectorToString(result.output) << std::endl;
-            std::cout << result.machine.length << std::endl;
-            std::cout << arrayToString(result.machine.code, result.machine.length) << std::endl;
-            std::cout << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
-            std::cout << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
+#ifdef DEBUG_MACHINE_INFO
+            std::cerr << arrayToString(result.machine.codeop, result.machine.length) << std::endl;
+            std::cerr << arrayToString(result.machine.codeval, result.machine.length) << std::endl;
+            std::cerr << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
+            std::cerr << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
+            std::cerr << error(target, result.output) << std::endl;
+#endif
         }
     }
 
