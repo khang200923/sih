@@ -70,7 +70,6 @@ struct RunningMachine {
     uint8_t tapepointer;
     uint16_t codepointer;
     machstream output;
-    bool halt;
 
     RunningMachine& operator=(const RunningMachine& other) {
         if (this != &other) { // self-assignment check
@@ -81,7 +80,6 @@ struct RunningMachine {
             tapepointer = other.tapepointer;
             codepointer = other.codepointer;
             output = other.output;
-            halt = other.halt;
         }
         return *this;
     }
@@ -101,7 +99,7 @@ Machine generateRandomMachine(uint16_t prog_len_limit) {
     uint16_t max_length = prog_len_limit;
     double log_max_length = std::log(max_length + 1);
     double log_length = std::exp(length_dist(gen) * log_max_length / std::numeric_limits<uint16_t>::max()) - 1;
-    machine.length = static_cast<uint16_t>(log_length);
+    machine.length = static_cast<uint16_t>(log_length)+1;
 
     std::uniform_int_distribution<uint8_t> op_dist(0, std::numeric_limits<uint8_t>::max() / CODE_PART_DIVISION);
     std::uniform_int_distribution<uint8_t> val_dist(0, CODE_PART_DIVISION);
@@ -142,7 +140,6 @@ RunningMachine initiateMachine(Machine machine, uint16_t memory_len) {
         result.memories[i] = initiateTape(memory_len);
         result.pointers[i] = 0;
     }
-    result.halt = false;
 
     return result;
 }
@@ -151,11 +148,7 @@ void runTick(RunningMachine& runmachine) {
     Machine& machine = runmachine.machine;
 
     if (runmachine.codepointer >= machine.length) {
-        runmachine.halt = true;
-    }
-
-    if (runmachine.halt) {
-        return;
+        runmachine.codepointer = 0;
     }
 
     //get from code pointer and tape pointer
@@ -201,7 +194,7 @@ RunningMachine roll(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memor
     RunningMachine runmachine = initiateMachine(machine, memory_len);
 
     for (int i = 0; i < exec_limit; ++i) {
-        if (runmachine.halt and (runmachine.output.size() > target.size())) {
+        if (runmachine.output.size() >= target.size()) {
             break;
         }
         runTick(runmachine);
@@ -223,12 +216,26 @@ uint32_t error(machstream target, machstream prediction) {
     return sum;
 }
 
-RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint16_t search_depth) {
-    uint16_t search_index = 0;
+void continueExec(RunningMachine& runmachine, uint16_t req, uint32_t continue_limit) {
+    std::cout << "Continue" << std::endl;
+    for (int i = 0; i < continue_limit; ++i) {
+        if (runmachine.output.size() >= req) {
+            break;
+        }
+        runTick(runmachine);
+    }
+}
+
+RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint32_t search_depth, uint16_t continue_req, uint32_t continue_limit) {
+    uint32_t search_index = 0;
     std::unique_ptr<RunningMachine> best;
     uint32_t besterror = std::numeric_limits<uint32_t>::max();
     uint16_t this_prog_len_limit = prog_len_limit;
     while (true) {
+        if (search_index % 1000 == 0) {
+            std::cout << "f";
+        }
+
         if (search_index >= search_depth) {
             break;
         }
@@ -250,6 +257,8 @@ RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len
 
         search_index += 1;
     }
+
+    continueExec(*best, target.size() + continue_req, continue_limit);
 
     return *best;
 }
@@ -284,7 +293,9 @@ int main(int argc, char* argv[]) {
     uint16_t exec_limit = 500;
     uint16_t prog_len_limit = 100;
     uint16_t memory_len = 100;
-    uint16_t search_depth = 10000;
+    uint32_t search_depth = 10000;
+    uint16_t continue_req = 10;
+    uint32_t continue_limit = 10000;
 
     bool alreadyCalc = false;
 
@@ -292,7 +303,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         if ((args[i] == "-o") || (args[i] == "--options")) {
-            if (i + 4 >= argc) {
+            if (i + 6 >= argc) {
                 std::cerr << "Invalid input: option flag.";
                 return 1;
             }
@@ -311,6 +322,14 @@ int main(int argc, char* argv[]) {
             ++i;
             if (args[i] != "d") {
                 search_depth = std::stoi(args[i]);
+            }
+            ++i;
+            if (args[i] != "d") {
+                continue_req = std::stoi(args[i]);
+            }
+            ++i;
+            if (args[i] != "d") {
+                continue_limit = std::stoi(args[i]);
             }
         }
         if ((args[i] == "-s") || (args[i] == "--seed")) {
@@ -332,7 +351,7 @@ int main(int argc, char* argv[]) {
                 target = parseInput(std::cin);
             }
 
-            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
+            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit);
             std::cout << vectorToString(result.output) << std::endl;
             std::cout << result.machine.length << std::endl;
             std::cout << arrayToString(result.machine.code, result.machine.length) << std::endl;
@@ -344,7 +363,7 @@ int main(int argc, char* argv[]) {
     if (not alreadyCalc) {
         target = parseInput(std::cin);
 
-        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
+        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit);
         std::cout << vectorToString(result.output) << std::endl;
     }
 
