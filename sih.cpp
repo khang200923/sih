@@ -6,6 +6,8 @@
 #include <cmath>
 #include <array>
 #include <algorithm>
+#include <csignal>
+#include <memory>
 
 using machstream = std::vector<uint16_t>;
 using memorytape = std::vector<uint16_t>;
@@ -14,10 +16,38 @@ std::uniform_real_distribution<double> dis(0.0, 1.0);
 const std::size_t MEMORY_TAPES = 8;
 const uint8_t CODE_PART_DIVISION = 32;
 const uint8_t CODE_OP_AMOUNT = 6;
+std::random_device rd;
+std::uint32_t seed = rd();
+std::mt19937 gen(seed);
+
+template<typename T>
+std::string vectorToString(const std::vector<T>& vec, size_t max = 0) {
+    if (max == 0) {max = vec.size();}
+    std::ostringstream oss;
+    if (!vec.empty()) {
+        oss << static_cast<int>(vec[0]);
+        for (size_t i = 1; i < max; ++i) {
+            oss << " " << static_cast<int>(vec[i]);
+        }
+    }
+    return oss.str();
+}
+
+template<typename T, size_t s>
+std::string arrayToString(const std::array<T, s>& arr, size_t max = 0) {
+    if (max == 0) {max = arr.size();}
+    std::ostringstream oss;
+    if (!arr.empty()) {
+        oss << static_cast<int>(arr[0]);
+        for (size_t i = 1; i < max; ++i) {
+            oss << " " << static_cast<int>(arr[i]);
+        }
+    }
+    return oss.str();
+}
 
 struct Machine {
     uint16_t length;
-    std::array<uint8_t, 65536> code;
     //For each element in code: (we call it ins)
     //ins // CODE_PART_DIVISION = op
     //ins % CODE_PART_DIVISION = val
@@ -27,7 +57,9 @@ struct Machine {
     //op=3: move loc pointer to left
     //op=4: move to another tape
     //op=5: output the current loc
+    std::array<uint8_t, 65536> code;
     std::array<uint16_t, 65536> zeroRedirect;
+    std::array<uint16_t, 65536> redirect;
 };
 
 struct RunningMachine {
@@ -39,36 +71,52 @@ struct RunningMachine {
     uint16_t codepointer;
     machstream output;
     bool halt;
+
+    RunningMachine& operator=(const RunningMachine& other) {
+        if (this != &other) { // self-assignment check
+            machine = other.machine;
+            tapelength = other.tapelength;
+            memories = other.memories;
+            pointers = other.pointers;
+            tapepointer = other.tapepointer;
+            codepointer = other.codepointer;
+            output = other.output;
+            halt = other.halt;
+        }
+        return *this;
+    }
 };
 
 template<typename T>
 T random_with_bias(T start_value, T end_value, double bias_factor = 0.6) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
     double weighted_choice = 1 - pow(dis(gen), bias_factor);
     return start_value + weighted_choice * (end_value - start_value);
 }
 
 Machine generateRandomMachine(uint16_t prog_len_limit) {
+
     Machine machine;
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
     std::uniform_int_distribution<uint16_t> length_dist(0, 65535);
     uint16_t max_length = prog_len_limit;
     double log_max_length = std::log(max_length + 1);
-    double log_length = std::exp(length_dist(gen) * std::log(1 + log_max_length) / std::numeric_limits<uint16_t>::max()) - 1;
+    double log_length = std::exp(length_dist(gen) * log_max_length / std::numeric_limits<uint16_t>::max()) - 1;
     machine.length = static_cast<uint16_t>(log_length);
 
-    std::uniform_int_distribution<uint8_t> code_dist(0, std::numeric_limits<uint8_t>::max());
+    std::uniform_int_distribution<uint8_t> op_dist(0, std::numeric_limits<uint8_t>::max() / CODE_PART_DIVISION);
+    std::uniform_int_distribution<uint8_t> val_dist(0, CODE_PART_DIVISION);
 
-    for (int i = 0; i < machine.length; ++i) {
-        machine.code[i] = code_dist(gen);
+    for (uint16_t i = 0; i < machine.length; ++i) {
+        machine.code[i] = op_dist(gen) * CODE_PART_DIVISION + random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1);
         if (dis(gen) < 0.2) {
-            machine.zeroRedirect[i] = i + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15));
+            machine.zeroRedirect[i] = static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length;
         } else {
-            machine.zeroRedirect[i] = i;
+            machine.zeroRedirect[i] = i + 1;
+        };
+        if (dis(gen) < 0.1) {
+            machine.redirect[i] = static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length;
+        } else {
+            machine.redirect[i] = i + 1;
         };
     }
 
@@ -113,6 +161,7 @@ void runTick(RunningMachine& runmachine) {
     //get from code pointer and tape pointer
     uint8_t& codePiece = machine.code[runmachine.codepointer];
     uint16_t& zeroRedirect = machine.zeroRedirect[runmachine.codepointer];
+    uint16_t& redirect = machine.redirect[runmachine.codepointer];
     memorytape& currentTape = runmachine.memories[runmachine.tapepointer];
     uint16_t& currentPointer = runmachine.pointers[runmachine.tapepointer];
     uint16_t& currentLoc = currentTape[currentPointer];
@@ -138,16 +187,21 @@ void runTick(RunningMachine& runmachine) {
         runmachine.output.push_back(currentLoc);
     }
 
-    runmachine.codepointer += 1;
+    if (currentLoc == 0) {
+        runmachine.codepointer = zeroRedirect;
+    } else {
+        runmachine.codepointer = redirect;
+    }
 
+    runmachine.codepointer += 1;
 }
 
-RunningMachine roll(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len) {
+RunningMachine roll(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, machstream target) {
     Machine machine = generateRandomMachine(prog_len_limit);
     RunningMachine runmachine = initiateMachine(machine, memory_len);
 
     for (int i = 0; i < exec_limit; ++i) {
-        if (runmachine.halt) {
+        if (runmachine.halt and (runmachine.output.size() > target.size())) {
             break;
         }
         runTick(runmachine);
@@ -171,31 +225,33 @@ uint32_t error(machstream target, machstream prediction) {
 
 RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint16_t search_depth) {
     uint16_t search_index = 0;
-    RunningMachine best;
+    std::unique_ptr<RunningMachine> best;
     uint32_t besterror = std::numeric_limits<uint32_t>::max();
-    RunningMachine alt;
-    uint32_t alterror;
-    uint16_t this_memory_len = memory_len;
+    uint16_t this_prog_len_limit = prog_len_limit;
     while (true) {
         if (search_index >= search_depth) {
             break;
         }
 
-        alt = roll(exec_limit, prog_len_limit, this_memory_len);
+        RunningMachine alt = roll(exec_limit, this_prog_len_limit, memory_len, target);
+        uint32_t alterror;
+
         alterror = error(target, alt.output);
 
         if (alterror < besterror) {
-            best = alt;
+            best.reset(new RunningMachine(std::move(alt)));
             besterror = alterror;
         }
-        if (besterror == 0) {
-            this_memory_len = best.machine.length;
+        else if (alterror == 0) {
+            best.reset(new RunningMachine(std::move(alt)));
+            besterror = 0;
+            this_prog_len_limit = best->machine.length;
         }
 
         search_index += 1;
     }
 
-    return best;
+    return *best;
 }
 
 template<typename InputStream>
@@ -207,38 +263,22 @@ machstream parseInput(InputStream& input) {
         result.push_back(num);
     }
 
-    if (!input.eof()) {
-        throw std::invalid_argument("Invalid input: must be array of integers in the range 0-65535.");
-    }
-
     return result;
 }
 
-template<typename T>
-std::string vectorToString(const std::vector<T>& vec) {
-    std::ostringstream oss;
-    if (!vec.empty()) {
-        oss << static_cast<int>(vec[0]);
-        for (size_t i = 1; i < vec.size(); ++i) {
-            oss << " " << static_cast<int>(vec[i]);
-        }
-    }
-    return oss.str();
-}
+void signalHandler(int signal) {
+    std::cerr << "We found signal: " << signal << std::endl;
 
-template<typename T, size_t s>
-std::string arrayToString(const std::array<T, s>& arr) {
-    std::ostringstream oss;
-    if (!arr.empty()) {
-        oss << static_cast<int>(arr[0]);
-        for (size_t i = 1; i < arr.size(); ++i) {
-            oss << " " << static_cast<int>(arr[i]);
-        }
-    }
-    return oss.str();
+    exit(1);
 }
 
 int main(int argc, char* argv[]) {
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGILL, signalHandler);
+    std::signal(SIGABRT, signalHandler);
+    std::signal(SIGFPE, signalHandler);
+    std::signal(SIGSEGV, signalHandler);
+
     std::vector<std::string> args(argv, argv + argc);
 
     uint16_t exec_limit = 500;
@@ -246,12 +286,14 @@ int main(int argc, char* argv[]) {
     uint16_t memory_len = 100;
     uint16_t search_depth = 10000;
 
+    bool alreadyCalc = false;
+
     machstream target;
 
     for (int i = 1; i < argc; ++i) {
         if ((args[i] == "-o") || (args[i] == "--options")) {
             if (i + 4 >= argc) {
-                std::cerr << "Invalid option flag";
+                std::cerr << "Invalid input: option flag.";
                 return 1;
             }
             ++i;
@@ -271,25 +313,39 @@ int main(int argc, char* argv[]) {
                 search_depth = std::stoi(args[i]);
             }
         }
+        if ((args[i] == "-s") || (args[i] == "--seed")) {
+            if (i + 1 >= argc) {
+                std::cerr << "Invalid input: seed flag." << std::endl;
+                return 1;
+            }
+            ++i;
+            seed = std::stoi(args[i]);
+            gen = std::mt19937(seed);
+        }
         if (args[i] == "-c" or args[i] == "--compute") {
+            alreadyCalc = true;
             if (i + 1 < argc) {
                 for (int j = ++i; j < argc; ++j) {
                     target.push_back(std::stoi(args[i]));
                 }
             } else {
-                try {
-                    target = parseInput(std::cin);
-                } catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: must be array of integers in the range 0-65535." << std::endl;
-                    return 1;
-                }
+                target = parseInput(std::cin);
             }
 
-            //calculation
             RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
-
             std::cout << vectorToString(result.output) << std::endl;
+            std::cout << result.machine.length << std::endl;
+            std::cout << arrayToString(result.machine.code, result.machine.length) << std::endl;
+            std::cout << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
+            std::cout << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
         }
+    }
+
+    if (not alreadyCalc) {
+        target = parseInput(std::cin);
+
+        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
+        std::cout << vectorToString(result.output) << std::endl;
     }
 
     return 0;

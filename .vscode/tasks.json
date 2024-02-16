@@ -6,10 +6,12 @@
             "command": "g++",
             "args": [
                 "-fdiagnostics-color=always",
-                "-g",
+                "-m64",
+                "-O0",
+                "-ggdb",
                 "${file}",
                 "-o",
-                "${fileDirname}\\${fileBasenameNoExtension}.exe"
+                "${fileDirname}\\${fileBasenameNoExtension}.exe",
             ],
             "options": {
                 "cwd": "${fileDirname}"
