@@ -12,8 +12,8 @@
 #include <thread>
 #include <future>
 
-#define DEBUG_MACHINE_INFO
-#define DEBUG_PREDICT_PROGRESS
+//#define DEBUG_MACHINE_INFO
+//#define DEBUG_PREDICT_PROGRESS
 
 using machstream = std::vector<uint16_t>;
 using memorytape = std::vector<uint16_t>;

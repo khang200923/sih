@@ -6,7 +6,8 @@
             "command": "g++",
             "args": [
                 "-fdiagnostics-color=always",
-                "-m64",
+                "-O3",
+                "-DNDEBUG",
                 "${file}",
                 "-o",
                 "${fileDirname}\\${fileBasenameNoExtension}.exe",
