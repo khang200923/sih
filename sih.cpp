@@ -8,9 +8,12 @@
 #include <algorithm>
 #include <csignal>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <future>
 
-//#define DEBUG_MACHINE_INFO
-//#define DEBUG_PREDICT_PROGRESS
+#define DEBUG_MACHINE_INFO
+#define DEBUG_PREDICT_PROGRESS
 
 using machstream = std::vector<uint16_t>;
 using memorytape = std::vector<uint16_t>;
@@ -22,6 +25,7 @@ const uint8_t CODE_OP_AMOUNT = 6;
 std::random_device rd;
 std::uint32_t seed = rd();
 std::mt19937 gen(seed);
+std::mutex mtx;
 
 template<typename T>
 std::string vectorToString(const std::vector<T>& vec, size_t max = 0) {
@@ -229,7 +233,7 @@ void continueExec(RunningMachine& runmachine, uint16_t req, uint32_t continue_li
     }
 }
 
-RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint32_t search_depth, uint16_t continue_req, uint32_t continue_limit) {
+RunningMachine predictBase(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint32_t search_depth) {
     uint32_t search_index = 0;
     std::unique_ptr<RunningMachine> best;
     uint32_t besterror = std::numeric_limits<uint32_t>::max();
@@ -246,9 +250,7 @@ RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len
         }
 
         RunningMachine alt = roll(exec_limit, this_prog_len_limit, memory_len, target);
-        uint32_t alterror;
-
-        alterror = error(target, alt.output);
+        uint32_t alterror = error(target, alt.output);
 
         if (alterror < besterror) {
             best.reset(new RunningMachine(std::move(alt)));
@@ -263,8 +265,46 @@ RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len
         search_index += 1;
     }
 
-    continueExec(*best, target.size() + continue_req, continue_limit);
+    return *best;
+}
 
+RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint32_t search_depth, uint16_t continue_req, uint32_t continue_limit, const uint8_t threads_num) {
+    if (threads_num == 1) {
+        RunningMachine best = predictBase(target, exec_limit, prog_len_limit, memory_len, search_depth);
+        continueExec(best, target.size() + continue_req, continue_limit);
+        return best;
+    }
+
+    std::array<std::future<RunningMachine>, 256> futures;
+
+    uint32_t search_left = search_depth;
+    for (int i = 0; i < threads_num; ++i) {
+        uint32_t take_search = search_left / (threads_num - i);
+        futures[i] = std::async(std::launch::async, predictBase, target, exec_limit, prog_len_limit, memory_len, take_search);
+        search_left -= take_search;
+    }
+
+    std::unique_ptr<RunningMachine> best;
+    uint32_t besterror = std::numeric_limits<uint32_t>::max();
+
+    for (int i = 0; i < threads_num; ++i) {
+        RunningMachine alt = futures[i].get();
+
+        uint32_t alterror = error(target, alt.output);
+
+        if (alterror < besterror) {
+            best.reset(new RunningMachine(std::move(alt)));
+            besterror = alterror;
+        }
+        else if (alterror == 0) {
+            if (alt.machine.length < best->machine.length) {
+                best.reset(new RunningMachine(std::move(alt)));
+                besterror = 0;
+            }
+        }
+    }
+
+    continueExec(*best, target.size() + continue_req, continue_limit);
     return *best;
 }
 
@@ -301,6 +341,7 @@ int main(int argc, char* argv[]) {
     uint32_t search_depth = 10000;
     uint16_t continue_req = 10;
     uint32_t continue_limit = 10000;
+    uint32_t threads_num = 1;
 
     bool alreadyCalc = false;
 
@@ -336,6 +377,10 @@ int main(int argc, char* argv[]) {
             if (args[i] != "d") {
                 continue_limit = std::stoi(args[i]);
             }
+            ++i;
+            if (args[i] != "d") {
+                threads_num = std::stoi(args[i]);
+            }
         }
         if ((args[i] == "-s") || (args[i] == "--seed")) {
             if (i + 1 >= argc) {
@@ -357,7 +402,7 @@ int main(int argc, char* argv[]) {
                 target = parseInput(std::cin);
             }
 
-            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit);
+            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit, threads_num);
             std::cout << vectorToString(result.output) << std::endl;
 #ifdef DEBUG_MACHINE_INFO
             std::cerr << arrayToString(result.machine.codeop, result.machine.length) << std::endl;
@@ -372,7 +417,7 @@ int main(int argc, char* argv[]) {
     if (not alreadyCalc) {
         target = parseInput(std::cin);
 
-        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit);
+        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit, threads_num);
         std::cout << vectorToString(result.output) << std::endl;
     }
 
