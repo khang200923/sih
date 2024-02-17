@@ -8,6 +8,12 @@
 #include <algorithm>
 #include <csignal>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <future>
+
+//#define DEBUG_MACHINE_INFO
+//#define DEBUG_PREDICT_PROGRESS
 
 using machstream = std::vector<uint16_t>;
 using memorytape = std::vector<uint16_t>;
@@ -19,6 +25,7 @@ const uint8_t CODE_OP_AMOUNT = 6;
 std::random_device rd;
 std::uint32_t seed = rd();
 std::mt19937 gen(seed);
+std::mutex mtx;
 
 template<typename T>
 std::string vectorToString(const std::vector<T>& vec, size_t max = 0) {
@@ -57,7 +64,8 @@ struct Machine {
     //op=3: move loc pointer to left
     //op=4: move to another tape
     //op=5: output the current loc
-    std::array<uint8_t, 65536> code;
+    std::array<uint8_t, 65536> codeop;
+    std::array<uint8_t, 65536> codeval;
     std::array<uint16_t, 65536> zeroRedirect;
     std::array<uint16_t, 65536> redirect;
 };
@@ -70,7 +78,6 @@ struct RunningMachine {
     uint8_t tapepointer;
     uint16_t codepointer;
     machstream output;
-    bool halt;
 
     RunningMachine& operator=(const RunningMachine& other) {
         if (this != &other) { // self-assignment check
@@ -81,7 +88,6 @@ struct RunningMachine {
             tapepointer = other.tapepointer;
             codepointer = other.codepointer;
             output = other.output;
-            halt = other.halt;
         }
         return *this;
     }
@@ -94,20 +100,20 @@ T random_with_bias(T start_value, T end_value, double bias_factor = 0.6) {
 }
 
 Machine generateRandomMachine(uint16_t prog_len_limit) {
-
     Machine machine;
 
     std::uniform_int_distribution<uint16_t> length_dist(0, 65535);
     uint16_t max_length = prog_len_limit;
     double log_max_length = std::log(max_length + 1);
     double log_length = std::exp(length_dist(gen) * log_max_length / std::numeric_limits<uint16_t>::max()) - 1;
-    machine.length = static_cast<uint16_t>(log_length);
+    machine.length = static_cast<uint16_t>(log_length)+1;
 
     std::uniform_int_distribution<uint8_t> op_dist(0, std::numeric_limits<uint8_t>::max() / CODE_PART_DIVISION);
     std::uniform_int_distribution<uint8_t> val_dist(0, CODE_PART_DIVISION);
 
     for (uint16_t i = 0; i < machine.length; ++i) {
-        machine.code[i] = op_dist(gen) * CODE_PART_DIVISION + random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1);
+        machine.codeop[i] = op_dist(gen) % CODE_OP_AMOUNT;
+        machine.codeval[i] = random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1);
         if (dis(gen) < 0.2) {
             machine.zeroRedirect[i] = static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length;
         } else {
@@ -142,7 +148,6 @@ RunningMachine initiateMachine(Machine machine, uint16_t memory_len) {
         result.memories[i] = initiateTape(memory_len);
         result.pointers[i] = 0;
     }
-    result.halt = false;
 
     return result;
 }
@@ -151,24 +156,17 @@ void runTick(RunningMachine& runmachine) {
     Machine& machine = runmachine.machine;
 
     if (runmachine.codepointer >= machine.length) {
-        runmachine.halt = true;
-    }
-
-    if (runmachine.halt) {
-        return;
+        runmachine.codepointer = 0;
     }
 
     //get from code pointer and tape pointer
-    uint8_t& codePiece = machine.code[runmachine.codepointer];
+    uint8_t op = machine.codeop[runmachine.codepointer];
+    uint8_t val = machine.codeval[runmachine.codepointer];
     uint16_t& zeroRedirect = machine.zeroRedirect[runmachine.codepointer];
     uint16_t& redirect = machine.redirect[runmachine.codepointer];
     memorytape& currentTape = runmachine.memories[runmachine.tapepointer];
     uint16_t& currentPointer = runmachine.pointers[runmachine.tapepointer];
     uint16_t& currentLoc = currentTape[currentPointer];
-
-    //split into op and val
-    uint8_t op = (codePiece / CODE_PART_DIVISION) % CODE_OP_AMOUNT;
-    uint8_t val = codePiece % CODE_PART_DIVISION;
 
     //do some computation
     if (op == 0) {
@@ -201,7 +199,7 @@ RunningMachine roll(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memor
     RunningMachine runmachine = initiateMachine(machine, memory_len);
 
     for (int i = 0; i < exec_limit; ++i) {
-        if (runmachine.halt and (runmachine.output.size() > target.size())) {
+        if (runmachine.output.size() >= target.size()) {
             break;
         }
         runTick(runmachine);
@@ -217,26 +215,42 @@ uint32_t error(machstream target, machstream prediction) {
 
     uint32_t sum = 0;
     for (uint16_t i = 0; i < target.size(); ++i) {
-            sum += std::min(target[i] - prediction[i], prediction[i] - target[i]);
+            sum += std::min<uint16_t>(target[i] - prediction[i], prediction[i] - target[i]);
     }
 
     return sum;
 }
 
-RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint16_t search_depth) {
-    uint16_t search_index = 0;
+void continueExec(RunningMachine& runmachine, uint16_t req, uint32_t continue_limit) {
+#ifdef DEBUG_PREDICT_PROGRESS
+    std::cerr << " ...continue" << std::endl;
+#endif
+    for (int i = 0; i < continue_limit; ++i) {
+        if (runmachine.output.size() >= req) {
+            break;
+        }
+        runTick(runmachine);
+    }
+}
+
+RunningMachine predictBase(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint32_t search_depth) {
+    uint32_t search_index = 0;
     std::unique_ptr<RunningMachine> best;
     uint32_t besterror = std::numeric_limits<uint32_t>::max();
     uint16_t this_prog_len_limit = prog_len_limit;
     while (true) {
+#ifdef DEBUG_PREDICT_PROGRESS
+        if (search_index % 1000 == 0) {
+            std::cerr << "f";
+        }
+#endif
+
         if (search_index >= search_depth) {
             break;
         }
 
         RunningMachine alt = roll(exec_limit, this_prog_len_limit, memory_len, target);
-        uint32_t alterror;
-
-        alterror = error(target, alt.output);
+        uint32_t alterror = error(target, alt.output);
 
         if (alterror < besterror) {
             best.reset(new RunningMachine(std::move(alt)));
@@ -251,6 +265,46 @@ RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len
         search_index += 1;
     }
 
+    return *best;
+}
+
+RunningMachine predict(machstream target, uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, uint32_t search_depth, uint16_t continue_req, uint32_t continue_limit, const uint8_t threads_num) {
+    if (threads_num == 1) {
+        RunningMachine best = predictBase(target, exec_limit, prog_len_limit, memory_len, search_depth);
+        continueExec(best, target.size() + continue_req, continue_limit);
+        return best;
+    }
+
+    std::array<std::future<RunningMachine>, 256> futures;
+
+    uint32_t search_left = search_depth;
+    for (int i = 0; i < threads_num; ++i) {
+        uint32_t take_search = search_left / (threads_num - i);
+        futures[i] = std::async(std::launch::async, predictBase, target, exec_limit, prog_len_limit, memory_len, take_search);
+        search_left -= take_search;
+    }
+
+    std::unique_ptr<RunningMachine> best;
+    uint32_t besterror = std::numeric_limits<uint32_t>::max();
+
+    for (int i = 0; i < threads_num; ++i) {
+        RunningMachine alt = futures[i].get();
+
+        uint32_t alterror = error(target, alt.output);
+
+        if (alterror < besterror) {
+            best.reset(new RunningMachine(std::move(alt)));
+            besterror = alterror;
+        }
+        else if (alterror == 0) {
+            if (alt.machine.length < best->machine.length) {
+                best.reset(new RunningMachine(std::move(alt)));
+                besterror = 0;
+            }
+        }
+    }
+
+    continueExec(*best, target.size() + continue_req, continue_limit);
     return *best;
 }
 
@@ -284,7 +338,10 @@ int main(int argc, char* argv[]) {
     uint16_t exec_limit = 500;
     uint16_t prog_len_limit = 100;
     uint16_t memory_len = 100;
-    uint16_t search_depth = 10000;
+    uint32_t search_depth = 10000;
+    uint16_t continue_req = 10;
+    uint32_t continue_limit = 10000;
+    uint32_t threads_num = 1;
 
     bool alreadyCalc = false;
 
@@ -292,7 +349,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         if ((args[i] == "-o") || (args[i] == "--options")) {
-            if (i + 4 >= argc) {
+            if (i + 6 >= argc) {
                 std::cerr << "Invalid input: option flag.";
                 return 1;
             }
@@ -312,6 +369,18 @@ int main(int argc, char* argv[]) {
             if (args[i] != "d") {
                 search_depth = std::stoi(args[i]);
             }
+            ++i;
+            if (args[i] != "d") {
+                continue_req = std::stoi(args[i]);
+            }
+            ++i;
+            if (args[i] != "d") {
+                continue_limit = std::stoi(args[i]);
+            }
+            ++i;
+            if (args[i] != "d") {
+                threads_num = std::stoi(args[i]);
+            }
         }
         if ((args[i] == "-s") || (args[i] == "--seed")) {
             if (i + 1 >= argc) {
@@ -326,25 +395,29 @@ int main(int argc, char* argv[]) {
             alreadyCalc = true;
             if (i + 1 < argc) {
                 for (int j = ++i; j < argc; ++j) {
-                    target.push_back(std::stoi(args[i]));
+                    target.push_back(std::stoi(args[j]));
+
                 }
             } else {
                 target = parseInput(std::cin);
             }
 
-            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
+            RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit, threads_num);
             std::cout << vectorToString(result.output) << std::endl;
-            std::cout << result.machine.length << std::endl;
-            std::cout << arrayToString(result.machine.code, result.machine.length) << std::endl;
-            std::cout << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
-            std::cout << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
+#ifdef DEBUG_MACHINE_INFO
+            std::cerr << arrayToString(result.machine.codeop, result.machine.length) << std::endl;
+            std::cerr << arrayToString(result.machine.codeval, result.machine.length) << std::endl;
+            std::cerr << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
+            std::cerr << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
+            std::cerr << error(target, result.output) << std::endl;
+#endif
         }
     }
 
     if (not alreadyCalc) {
         target = parseInput(std::cin);
 
-        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth);
+        RunningMachine result = predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit, threads_num);
         std::cout << vectorToString(result.output) << std::endl;
     }
 
