@@ -14,9 +14,6 @@
 
 #include "machine.h"
 
-//#define DEBUG_MACHINE_INFO
-//#define DEBUG_PREDICT_PROGRESS
-
 template<typename T>
 std::string vectorToString(const std::vector<T>& vec, size_t max = 0) {
     if (max == 0) {max = vec.size();}

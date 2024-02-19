@@ -1,19 +1,16 @@
-#include <iostream>
-#include <cstdint>
 #include <vector>
-#include <sstream>
 #include <random>
 #include <cmath>
 #include <array>
-#include <algorithm>
-#include <csignal>
-#include <memory>
 #include <mutex>
 #include <thread>
 #include <future>
 
 #ifndef MACHINE_H
 #define MACHINE_H
+
+//#define DEBUG_MACHINE_INFO
+//#define DEBUG_PREDICT_PROGRESS
 namespace mach {
     using machstream = std::vector<uint16_t>;
     using memorytape = std::vector<uint16_t>;
@@ -22,6 +19,8 @@ namespace mach {
     const std::size_t MEMORY_TAPES = 8;
     const uint8_t CODE_PART_DIVISION = 32;
     const uint8_t CODE_OP_AMOUNT = 6;
+    const uint8_t MACHINE_PER_WORK = 5;
+    const uint8_t COMPARE_PER_WORK = 50;
     std::random_device rd;
     std::uint32_t seed = rd();
     std::mt19937 gen(seed);
@@ -42,6 +41,18 @@ namespace mach {
         std::array<uint8_t, 65536> codeval;
         std::array<uint16_t, 65536> zeroRedirect;
         std::array<uint16_t, 65536> redirect;
+
+        Machine(Machine& other) {
+            length = other.length;
+            for (size_t i = 0; i < 65536; ++i) {
+                codeop[i] = other.codeop[i];
+                codeval[i] = other.codeval[i];
+                zeroRedirect[i] = other.zeroRedirect[i];
+                redirect[i] = other.redirect[i];
+            }
+        }
+
+        Machine() {}
     };
 
     struct RunningMachine {
@@ -53,18 +64,22 @@ namespace mach {
         uint16_t codepointer;
         machstream output;
 
-        RunningMachine& operator=(const RunningMachine& other) {
-            if (this != &other) { // self-assignment check
-                machine = other.machine;
-                tapelength = other.tapelength;
-                memories = other.memories;
-                pointers = other.pointers;
-                tapepointer = other.tapepointer;
-                codepointer = other.codepointer;
-                output = other.output;
+        RunningMachine(const RunningMachine& other) {
+            machine = other.machine;
+            tapelength = other.tapelength;
+            tapepointer = other.tapepointer;
+            codepointer = other.codepointer;
+            output = other.output;
+
+            for (size_t i = 0; i < MEMORY_TAPES; ++i) {
+                memories[i].resize(other.memories[i].size());
+                std::copy(other.memories[i].begin(), other.memories[i].end(), memories[i].begin());
             }
-            return *this;
+
+            std::copy(std::begin(other.pointers), std::end(other.pointers), std::begin(pointers));
         }
+
+        RunningMachine() {}
     };
 
     template<typename T>
@@ -193,6 +208,14 @@ namespace mach {
         }
 
         return sum;
+    }
+
+    Machine mutate(Machine machine) {
+
+    }
+
+    RunningMachine work(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, machstream target) {
+
     }
 
     void continueExec(RunningMachine& runmachine, uint16_t req, uint32_t continue_limit) {
