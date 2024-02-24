@@ -151,8 +151,9 @@ int main(int argc, char* argv[]) {
             std::cout << getFileContent("text/warranty.txt");
             return 0;
         }
-        if (args[i] == "--conditions") {
-
+        if (args[i] == "-h" or args[i] == "--help") {
+            std::cout << getFileContent("text/help.txt");
+            return 0;
         }
         if (args[i] == "-c" or args[i] == "--compute") {
             alreadyCalc = true;

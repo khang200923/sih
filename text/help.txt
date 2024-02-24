@@ -1,0 +1,32 @@
+Usage: sih [OPTIONS] [-c/--compute TARGET_VALUES]
+
+Options:
+  -h, --help               Display this help message and exit.
+  --version                Display version information and exit.
+  --license                Display licensing information and exit.
+  --warranty               Display warranty information and exit.
+  -el, --exec-limit LIMIT  Set the execution limit for the programs. Default is 500.
+  -pll, --prog-len-limit LIMIT
+                           Set the program length limit. Default is 100.
+  -ml, --memory-len LENGTH
+                           Set the memory length. Default is 100.
+  -sd, --search-depth DEPTH
+                           Set the search depth. Default is 10000.
+  -cr, --continue-req COUNT
+                           Set the continue request count. Default is 10.
+  -cl, --continue-limit LIMIT
+                           Set the continue limit. Default is 10000.
+  -tn, --threads-num COUNT Set the number of threads to use. Default is 1.
+  -s, --seed SEED          Set the seed for random number generation.
+  -c, --compute            Compute the result for the provided target values.
+
+Description:
+  sih (Solomonoff Induction Heuristic) is a program that predicts outputs for given target values using a computable variation of Solomonoff induction.
+
+  By default, sih reads target values from standard input and computes the result. Optionally, you can provide target values directly through command-line arguments using the -c/--compute option.
+
+Examples:
+  sih                       Compute result for target values from standard input.
+  sih -c 3 5 7              Compute result for target values 3, 5, and 7.
+  sih --exec-limit 1000 -c 3 5 7
+                            Compute result with execution limit set to 1000.
