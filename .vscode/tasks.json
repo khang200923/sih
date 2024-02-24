@@ -35,6 +35,8 @@
                 "-O0",
                 "-no-pie",
                 "-ggdb",
+                "-DDEBUG_MACHINE_INFO",
+                "-DDEBUG_PREDICT_PROGRESS",
                 "${file}",
                 "-o",
                 "${fileDirname}\\${fileBasenameNoExtension}db.exe",
