@@ -52,6 +52,14 @@ mach::machstream parseInput(InputStream& input) {
     return result;
 }
 
+template<typename T>
+void configVal(std::vector<std::string> commands, T& configVar, int& i, std::vector<std::string>& args) {
+    if (std::find(commands.begin(), commands.end(), args[i]) != commands.end()) {
+        ++i;
+        configVar = std::stoi(args[i]);
+    }
+}
+
 void signalHandler(int signal) {
     std::cerr << "We found signal: " << signal << std::endl;
 
@@ -80,40 +88,13 @@ int main(int argc, char* argv[]) {
     mach::machstream target;
 
     for (int i = 1; i < argc; ++i) {
-        if ((args[i] == "-o") || (args[i] == "--options")) {
-            if (i + 6 >= argc) {
-                std::cerr << "Invalid input: option flag.";
-                return 1;
-            }
-            ++i;
-            if (args[i] != "d") {
-                exec_limit = std::stoi(args[i]);
-            }
-            ++i;
-            if (args[i] != "d") {
-                prog_len_limit = std::stoi(args[i]);
-            }
-            ++i;
-            if (args[i] != "d") {
-                memory_len = std::stoi(args[i]);
-            }
-            ++i;
-            if (args[i] != "d") {
-                search_depth = std::stoi(args[i]);
-            }
-            ++i;
-            if (args[i] != "d") {
-                continue_req = std::stoi(args[i]);
-            }
-            ++i;
-            if (args[i] != "d") {
-                continue_limit = std::stoi(args[i]);
-            }
-            ++i;
-            if (args[i] != "d") {
-                threads_num = std::stoi(args[i]);
-            }
-        }
+        configVal(std::vector<std::string>{"-el", "--exec-limit"}, exec_limit, i, args);
+        configVal(std::vector<std::string>{"-pll", "--prog-len-limit"}, prog_len_limit, i, args);
+        configVal(std::vector<std::string>{"-ml", "--memory-len"}, memory_len, i, args);
+        configVal(std::vector<std::string>{"-sd", "--search-depth"}, search_depth, i, args);
+        configVal(std::vector<std::string>{"-cr", "--continue-req"}, continue_req, i, args);
+        configVal(std::vector<std::string>{"-cl", "--continue-limit"}, continue_limit, i, args);
+        configVal(std::vector<std::string>{"-tn", "--threads-num"}, threads_num, i, args);
         if ((args[i] == "-s") || (args[i] == "--seed")) {
             if (i + 1 >= argc) {
                 std::cerr << "Invalid input: seed flag." << std::endl;
@@ -141,7 +122,7 @@ int main(int argc, char* argv[]) {
             std::cerr << arrayToString(result.machine.codeval, result.machine.length) << std::endl;
             std::cerr << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
             std::cerr << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
-            std::cerr << error(target, result.output) << std::endl;
+            std::cerr << mach::error(target, result.output) << std::endl;
 #endif
         }
     }

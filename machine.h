@@ -210,14 +210,6 @@ namespace mach {
         return sum;
     }
 
-    Machine mutate(Machine machine) {
-
-    }
-
-    RunningMachine work(uint16_t exec_limit, uint16_t prog_len_limit, uint16_t memory_len, machstream target) {
-
-    }
-
     void continueExec(RunningMachine& runmachine, uint16_t req, uint32_t continue_limit) {
     #ifdef DEBUG_PREDICT_PROGRESS
         std::cerr << " ...continue" << std::endl;
