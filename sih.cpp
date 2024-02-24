@@ -1,3 +1,11 @@
+/*This file is part of sih.
+
+sih is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+sih is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with sih. If not, see <https://www.gnu.org/licenses/>.*/
+
 #include <iostream>
 #include <cstdint>
 #include <vector>
@@ -11,8 +19,13 @@
 #include <mutex>
 #include <thread>
 #include <future>
+#include <fstream>
 
 #include "machine.h"
+
+const std::string VERSION_NUMBER = "v0.2.0 beta";
+const std::string COPYRIGHT_YEAR = "2024";
+const std::string AUTHOR_NAME = "khang200923";
 
 template<typename T>
 std::string vectorToString(const std::vector<T>& vec, size_t max = 0) {
@@ -50,6 +63,19 @@ mach::machstream parseInput(InputStream& input) {
     }
 
     return result;
+}
+
+std::string getFileContent(const std::string& filePath) {
+    std::ifstream file(filePath);
+    if (file.is_open()) {
+        std::string content((std::istreambuf_iterator<char>(file)),
+                            (std::istreambuf_iterator<char>()));
+        file.close();
+        return content;
+    } else {
+        std::cerr << "Unable to open file: " << filePath << std::endl;
+        throw std::runtime_error("Failed to open file");
+    }
 }
 
 template<typename T>
@@ -103,6 +129,30 @@ int main(int argc, char* argv[]) {
             ++i;
             mach::seed = std::stoi(args[i]);
             mach::gen = std::mt19937(mach::seed);
+        }
+        if (args[i] == "--version") {
+            std::cout <<
+            "sih " << VERSION_NUMBER << std::endl
+            << "Copyright (C) " << COPYRIGHT_YEAR << " " << AUTHOR_NAME << std::endl <<
+            "This program comes with ABSOLUTELY NO WARRANTY;\n"
+            "not even for MERCHANTABILITY or FITNESS FOR A\n"
+            "PARTICULAR PURPOSE; for details type `--warranty'.\n"
+            "You should have received a copy of the GNU General\n"
+            "Public License along with this program; for details\n"
+            "type `--license'. If not, see <https://www.gnu.org/licenses/>."
+            << std::endl;
+            return 0;
+        }
+        if (args[i] == "--license") {
+            std::cout << getFileContent("LICENSE");
+            return 0;
+        }
+        if (args[i] == "--warranty") {
+            std::cout << getFileContent("text/warranty.txt");
+            return 0;
+        }
+        if (args[i] == "--conditions") {
+
         }
         if (args[i] == "-c" or args[i] == "--compute") {
             alreadyCalc = true;
