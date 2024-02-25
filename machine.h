@@ -52,18 +52,18 @@ namespace mach {
         //op=3: move loc pointer to left
         //op=4: move to another tape
         //op=5: output the current loc
-        std::array<uint8_t, 65536> codeop;
-        std::array<uint8_t, 65536> codeval;
-        std::array<uint16_t, 65536> zeroRedirect;
-        std::array<uint16_t, 65536> redirect;
+        std::vector<uint8_t> codeop;
+        std::vector<uint8_t> codeval;
+        std::vector<uint16_t> zeroRedirect;
+        std::vector<uint16_t> redirect;
 
         Machine(Machine& other) {
             length = other.length;
-            for (size_t i = 0; i < 65536; ++i) {
-                codeop[i] = other.codeop[i];
-                codeval[i] = other.codeval[i];
-                zeroRedirect[i] = other.zeroRedirect[i];
-                redirect[i] = other.redirect[i];
+            for (size_t i = 0; i < length; ++i) {
+                codeop.push_back(other.codeop[i]);
+                codeval.push_back(other.codeval[i]);
+                zeroRedirect.push_back(other.zeroRedirect[i]);
+                redirect.push_back(other.redirect[i]);
             }
         }
 
@@ -116,17 +116,17 @@ namespace mach {
         std::uniform_int_distribution<uint8_t> val_dist(0, CODE_PART_DIVISION);
 
         for (uint16_t i = 0; i < machine.length; ++i) {
-            machine.codeop[i] = op_dist(gen) % CODE_OP_AMOUNT;
-            machine.codeval[i] = random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1);
+            machine.codeop.push_back(op_dist(gen) % CODE_OP_AMOUNT);
+            machine.codeval.push_back(random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1));
             if (dis(gen) < 0.2) {
-                machine.zeroRedirect[i] = static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length;
+                machine.zeroRedirect.push_back(static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length);
             } else {
-                machine.zeroRedirect[i] = i + 1;
+                machine.zeroRedirect.push_back(i + 1);
             };
             if (dis(gen) < 0.1) {
-                machine.redirect[i] = static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length;
+                machine.redirect.push_back(static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length);
             } else {
-                machine.redirect[i] = i + 1;
+                machine.redirect.push_back(i + 1);
             };
         }
 

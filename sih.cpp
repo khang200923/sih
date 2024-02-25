@@ -176,10 +176,10 @@ int main(int argc, char* argv[]) {
             mach::RunningMachine result = mach::predict(target, exec_limit, prog_len_limit, memory_len, search_depth, continue_req, continue_limit, threads_num);
             std::cout << vectorToString(result.output) << std::endl;
 #ifdef DEBUG_MACHINE_INFO
-            std::cerr << arrayToString(result.machine.codeop, result.machine.length) << std::endl;
-            std::cerr << arrayToString(result.machine.codeval, result.machine.length) << std::endl;
-            std::cerr << arrayToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
-            std::cerr << arrayToString(result.machine.redirect, result.machine.length) << std::endl;
+            std::cerr << vectorToString(result.machine.codeop, result.machine.length) << std::endl;
+            std::cerr << vectorToString(result.machine.codeval, result.machine.length) << std::endl;
+            std::cerr << vectorToString(result.machine.zeroRedirect, result.machine.length) << std::endl;
+            std::cerr << vectorToString(result.machine.redirect, result.machine.length) << std::endl;
             std::cerr << mach::error(target, result.output) << std::endl;
 #endif
         }
