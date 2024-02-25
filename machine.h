@@ -59,6 +59,10 @@ namespace mach {
 
         Machine(Machine& other) {
             length = other.length;
+            codeop.reserve(length);
+            codeval.reserve(length);
+            zeroRedirect.reserve(length);
+            redirect.reserve(length);
             for (size_t i = 0; i < length; ++i) {
                 codeop.push_back(other.codeop[i]);
                 codeval.push_back(other.codeval[i]);
@@ -115,18 +119,22 @@ namespace mach {
         std::uniform_int_distribution<uint8_t> op_dist(0, std::numeric_limits<uint8_t>::max() / CODE_PART_DIVISION);
         std::uniform_int_distribution<uint8_t> val_dist(0, CODE_PART_DIVISION);
 
+        machine.codeop.reserve(machine.length);
+        machine.codeval.reserve(machine.length);
+        machine.zeroRedirect.reserve(machine.length);
+        machine.redirect.reserve(machine.length);
         for (uint16_t i = 0; i < machine.length; ++i) {
-            machine.codeop.push_back(op_dist(gen) % CODE_OP_AMOUNT);
-            machine.codeval.push_back(random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1));
+            machine.codeop.emplace_back(op_dist(gen) % CODE_OP_AMOUNT);
+            machine.codeval.emplace_back(random_with_bias<uint8_t>(0, CODE_PART_DIVISION, 0.1));
             if (dis(gen) < 0.2) {
-                machine.zeroRedirect.push_back(static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length);
+                machine.zeroRedirect.emplace_back(static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length);
             } else {
-                machine.zeroRedirect.push_back(i + 1);
+                machine.zeroRedirect.emplace_back(i + 1);
             };
             if (dis(gen) < 0.1) {
-                machine.redirect.push_back(static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length);
+                machine.redirect.emplace_back(static_cast<uint16_t>(i + 1 + ((dis(gen) > 0) ? 1 : -1) * pow(2, random_with_bias<uint16_t>(0, 15))) % machine.length);
             } else {
-                machine.redirect.push_back(i + 1);
+                machine.redirect.emplace_back(i + 1);
             };
         }
 
@@ -136,7 +144,7 @@ namespace mach {
     memorytape initiateTape(uint16_t length) {
         memorytape tape = memorytape();
         for (int i = 0; i < length; ++i) {
-            tape.push_back(0);
+            tape.emplace_back(0);
         }
 
         return tape;
