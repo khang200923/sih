@@ -28,7 +28,7 @@ with sih. If not, see <https://www.gnu.org/licenses/>.*/
 #include <future>
 #include <fstream>
 
-#include "machine.h"
+#include "machine/machine.h"
 
 const std::string VERSION_NUMBER = "v0.2.0 beta";
 const std::string COPYRIGHT_YEAR = "2024";
